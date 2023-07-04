@@ -5,42 +5,13 @@ import (
 	"strings"
 )
 
-// MaskProvider - representation of the mask instance with paths
+// PathsProvider - representation of the mask instance with paths
 // what can be reset, normalize, stringed, etc.
-// fieldmaskpb.FieldMask implements MaskProvider interface and can be
+// fieldmaskpb.FieldMask implements PathsProvider interface and can be
 // passed into Reduce.
-type MaskProvider interface {
+type PathsProvider interface {
 	// GetPaths - returns the string paths core of mask
 	GetPaths() []string
-
-	// This logic is encapsulated in the mask implementation.
-	//
-	// Normalize - converts the mask to its canonical form where all paths are sorted
-	// and redundant paths are removed.
-	Normalize()
-
-	// This logic is encapsulated in the mask implementation.
-	//
-	// Reset - resets the mask to the default state.
-	Reset()
-
-	// This logic is encapsulated in the mask implementation.
-	//
-	// String - returns ыtring representation of the mask, with all its paths
-	String() string
-}
-
-type ReducedMask interface {
-	// GetPaths returns the string paths of reduced mask.
-	GetPaths() []string
-}
-
-type reducedPaths struct {
-	p []string
-}
-
-func (rp *reducedPaths) GetPaths() []string {
-	return rp.p
 }
 
 // ReduceDegree - the degree of reduction of the mask.
@@ -48,7 +19,7 @@ func (rp *reducedPaths) GetPaths() []string {
 // where n is the number of nodes (or fields in the field mask).
 // If the degree of reduction is 3
 // then we will leave only the first three nodes - {a_1, a_2, a_3}.
-type ReduceDegree int
+type ReduceDegree uint16
 
 const (
 	// The degree to which only the root node remains
@@ -59,16 +30,32 @@ const (
 )
 
 // Reduce - reduces the mask to the specified degree and removes matches
-func Reduce(mask MaskProvider, degree ReduceDegree) ReducedMask {
-	mask.Normalize()
+func Reduce(mask PathsProvider, degree ReduceDegree) *Mask {
+	if mask == nil || degree == 0 {
+		return &Mask{}
+	}
 
-	rd := reduceToDegree(mask, int(degree))
-	rd.p = removeDuplicateStrings(rd.p)
-	return rd
+	maskPaths := mask.GetPaths()
+	reducedMask := &Mask{
+		p: make([]string, len(maskPaths)),
+	}
+
+	copy(reducedMask.p, maskPaths)
+
+	reducedMask.reduce(int(degree))
+	return reducedMask
 }
 
-func reduceToDegree(mask MaskProvider, degree int) *reducedPaths {
-	maskPaths := mask.GetPaths()
+type Mask struct {
+	p []string
+}
+
+func (m *Mask) GetPaths() []string {
+	return m.p
+}
+
+func (m *Mask) reduce(degree int) {
+	maskPaths := m.GetPaths()
 	for i, p := range maskPaths {
 		if strings.IndexByte(p, '.') == -1 || len(p) < degree+1 {
 			continue
@@ -82,9 +69,24 @@ func reduceToDegree(mask MaskProvider, degree int) *reducedPaths {
 		maskPaths[i] = p[:ri]
 	}
 
-	return &reducedPaths{
-		p: maskPaths,
+	m.removeDuplicates()
+}
+
+func (m *Mask) removeDuplicates() {
+	if len(m.p) < 1 {
+		return
 	}
+
+	sort.Strings(m.p)
+	j := 1
+	for i := 1; i < len(m.p); i++ {
+		if m.p[i-1] != m.p[i] {
+			m.p[j] = m.p[i]
+			j++
+		}
+	}
+
+	m.p = m.p[:j]
 }
 
 func getMaxReducedIndex(path string, degree int) int {
@@ -101,21 +103,4 @@ func getMaxReducedIndex(path string, degree int) int {
 	}
 
 	return ri
-}
-
-func removeDuplicateStrings(s []string) []string {
-	if len(s) < 1 {
-		return s
-	}
-
-	sort.Strings(s)
-	p := 1
-	for i := 1; i < len(s); i++ {
-		if s[i-1] != s[i] {
-			s[p] = s[i]
-			p++
-		}
-	}
-
-	return s[:p]
 }
